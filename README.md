@@ -9,23 +9,18 @@ Estimation de la **demande réelle** des produits frais lorsque les **ruptures d
 ## Vue d'ensemble
 
 ```mermaid
-flowchart TD
-    A["Données FreshRetailNet-50K<br/>1,15 M lignes produit × magasin × jour<br/>ventes + statut de stock horaire"] --> B["Préparation sans fuite de données<br/>décalages ≥ 7 jours, target encoding out-of-fold"]
-    B --> C["Découpage temporel<br/>Fit → Validation → Évaluation"]
+flowchart LR
+    A["Données<br/>FreshRetailNet-50K"] --> B["Préparation<br/>sans fuite"]
+    B --> C["Split<br/>temporel"]
+    C --> D["Modèle de base<br/>jours sans rupture"]
+    C --> E["Option A<br/>tous les jours"]
+    E --> F["Contrainte<br/>monotone"]
+    D --> G["Correction<br/>du biais k"]
+    F --> G
+    G --> H["Plancher<br/>max(prédiction, ventes)"]
+    H --> I["Demande latente<br/>+6,5 à +9,7 %"]
+    G --> J["Précision<br/>WAPE 27 %, R² 0,96"]
 
-    C --> D["Modèle de base<br/>entraîné sur les jours SANS rupture<br/>ventes = demande"]
-    C --> E["Option A : approche contrefactuelle<br/>entraîné sur TOUS les jours<br/>+ heures de rupture du jour"]
-
-    E --> F["Contrainte monotone<br/>plus de rupture = jamais plus de ventes"]
-    F --> G["Prédiction du scénario sans rupture<br/>heures de rupture fixées à 0"]
-    D --> H["Prédiction d'un jour normal"]
-
-    G --> I["Correction du biais<br/>facteur k appris sur la validation"]
-    H --> I
-    I --> J["Plancher<br/>demande = max(prédiction, ventes)"]
-
-    J --> K["Demande latente estimée<br/>+6,5 % à +9,7 % au-dessus des ventes"]
-    I --> L["Évaluation sur les jours sans rupture<br/>meilleure WAPE 27 %, R² 0,96<br/>−47 % d'erreur vs baseline"]
 ```
 
 **Lecture du schéma :**
@@ -159,7 +154,6 @@ LightGBM, XGBoost, CatBoost, Random Forest, MLP (scikit-learn), deux ensembles (
 | Baseline naïve | 0,683 | 2,582 | 0,351 | 51,0 % | −11,4 % |
 
 **Lecture des métriques :**
-- **MAE** : erreur moyenne en unités vendues par produit, magasin et jour.
 - **WAPE** : erreur totale rapportée au volume total vendu ; c'est la métrique la plus lisible côté métier.
 - **Biais** : sur-prévision (> 0) ou sous-prévision (< 0) globale.
 
@@ -238,34 +232,8 @@ L'ensemble s'adapte automatiquement aux modèles disponibles (2 au minimum).
 
 ---
 
-## 7. Structure du notebook
-
-| Partie | Contenu |
-|---|---|
-| **0. Préparation** | Installation, imports, chargement de FreshRetailNet-50K, filtrage des villes |
-| **1. Exploration** | Analyse géographique, temporelle, ruptures, promotions, intermittence de la demande |
-| **2. Prédiction de la demande latente** | |
-| 2.1 Configuration et panel | Variables décalées (≥ 7 jours), découpage temporel, target encoding, métriques et correction k |
-| 2.2 Modèles de base | LightGBM, XGBoost, Random Forest, MLP, comparaison et diagnostic sur les jours en rupture |
-| 2.3 Option A | Préparation, LightGBM, XGBoost, Random Forest, MLP, CatBoost |
-| 2.4 Ensemble et comparaison | Ensembles, tableau base vs Option A, effet appris de la rupture |
-| 2.5 Améliorations | LightGBM monotone, plancher `max(prédiction, ventes)`, tableau final `latent_eval` |
-| **3. Prédiction des signaux de rupture** | Gradient Boosting, LightGBM, variables avancées, interprétation SHAP |
-
-**Sortie principale :** le DataFrame `latent_eval` contient, pour chaque produit × magasin × jour de la semaine d'évaluation, les ventes observées, l'indicateur de rupture et la **demande latente estimée**.
-
----
-
 ## 8. Limites et pistes d'amélioration
 
 **Limites :**
 - **Confusion rupture / forte demande :** même avec la contrainte monotone, le modèle n'apprend pas qu'une rupture courte (0 à 4 h) fait baisser les ventes. L'effet reste plat, et la demande perdue est sous-estimée pour ces jours.
-- **Plancher biaisé à la hausse :** `max(prédiction, ventes)` transforme une partie du bruit de prédiction en « demande perdue ».
 - **Évaluation sur une seule semaine :** les résultats peuvent varier selon la période (saisonnalité, promotions).
-- **MLP (A) instable :** il s'arrête après 1 époque et se dégrade fortement sur l'évaluation ; il est exclu de l'ensemble.
-
-**Pistes :**
-- **Extrapolation horaire :** utiliser le rythme de vente des heures précédant la rupture pour estimer directement les ventes manquées, et valider ainsi la fourchette obtenue.
-- **Validation glissante** sur plusieurs semaines, pour des métriques plus robustes.
-- **Contrainte monotone** étendue à XGBoost et CatBoost, et intégration dans l'ensemble.
-- **Modèles de demande censurée** (Tobit, maximum de vraisemblance censuré), qui traitent explicitement les ventes coupées.
